@@ -17,6 +17,7 @@ import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.json4s._
 import org.rogach.scallop.{ScallopConf, ScallopOption}
 import org.joda.time.DateTime
+import org.joda.time.{DateTime, Days, format}
 
 class ErrorAggregator extends java.io.Serializable{
 
@@ -337,40 +338,46 @@ class ErrorAggregator extends java.io.Serializable{
   }
 
   def writeBatchAggregates(spark: SparkSession, opts: Opts): Unit = {
-    val from = opts.from()
+    val fmt = format.DateTimeFormat.forPattern("yyyyMMdd")
+
+    val from = fmt.parseDateTime(opts.from())
     val to = opts.to.get match {
-      case Some(t) => t
-      case _ => DateTime.now.minusDays(1).toString("yyyyMMdd")
+      case Some(t) => fmt.parseDateTime(t)
+      case _ => DateTime.now.minusDays(1)
     }
 
     implicit val sc = spark.sparkContext
-    val pings = Dataset("telemetry")
-      .where("sourceName") {
-        case "telemetry" => true
-      }.where("sourceVersion") {
-        case "4" => true
-      }.where("docType") {
-        case docType if allowedDocTypes.contains(docType) => true
-      }.where("appName") {
-        case appName if allowedAppNames.contains(appName) => true
-      }.where("submissionDate") {
-        case date if from <= date && date <= to => true
-      }.records(opts.fileLimit.get)
-      .map(m => Row(m.toByteArray))
 
-    val schema = StructType(List(
-        StructField("value", BinaryType, true)
-    ))
+    for (offset <- 0 to Days.daysBetween(from, to).getDays) {
+      val currentDate = from.plusDays(offset).toString("yyyyMMdd")
 
-    val pingsDataframe = spark.createDataFrame(pings, schema)
-    val outputPath = opts.outputPath()
+      val pings = Dataset("telemetry")
+        .where("sourceName") {
+          case "telemetry" => true
+        }.where("sourceVersion") {
+          case "4" => true
+        }.where("docType") {
+          case docType if allowedDocTypes.contains(docType) => true
+        }.where("appName") {
+          case appName if allowedAppNames.contains(appName) => true
+        }.where("submissionDate") {
+          case date if date == currentDate => true
+        }.records(opts.fileLimit.get)
+        .map(m => Row(m.toByteArray))
 
-    aggregate(pingsDataframe, raiseOnError = opts.raiseOnError(), online = false)
-      .repartition(opts.numParquetFiles())
-      .write
-      .mode("overwrite")
-      .partitionBy("submission_date")
-      .parquet(s"${outputPath}/${outputPrefix}")
+      val schema = StructType(List(
+          StructField("value", BinaryType, true)
+      ))
+
+      val pingsDataframe = spark.createDataFrame(pings, schema)
+      val outputPath = opts.outputPath()
+
+      aggregate(pingsDataframe, raiseOnError = opts.raiseOnError(), online = false)
+        .repartition(opts.numParquetFiles())
+        .write
+        .mode("overwrite")
+        .parquet(s"${outputPath}/${outputPrefix}/submission_date=${currentDate}")
+    }
 
     spark.stop()
   }
