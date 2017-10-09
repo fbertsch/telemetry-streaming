@@ -28,8 +28,6 @@ class TestExperimentErrorAggregator extends AsyncFlatSpec with Matchers with Bef
   implicit val formats = DefaultFormats
   val k = TestUtils.scalarValue
   val app = TestUtils.application
-  val experimentErrorAggregator = new ExperimentErrorAggregator()
-
   val spark = SparkSession.builder()
     .appName("Error Aggregates")
     .config("spark.streaming.stopGracefullyOnShutdown", "true")
@@ -44,7 +42,7 @@ class TestExperimentErrorAggregator extends AsyncFlatSpec with Matchers with Bef
     val messages =
       (TestUtils.generateCrashMessages(k)
         ++ TestUtils.generateMainMessages(k)).map(_.toByteArray).seq
-    val df = experimentErrorAggregator.aggregate(spark.sqlContext.createDataset(messages).toDF, raiseOnError = true, online = false)
+    val df = ExperimentErrorAggregator.aggregate(spark.sqlContext.createDataset(messages).toDF, raiseOnError = true, online = false)
 
     // 1 for each experiment (there are 2), and one for a null experiment
     df.count() should be (3)
@@ -53,7 +51,8 @@ class TestExperimentErrorAggregator extends AsyncFlatSpec with Matchers with Bef
       "channel",
       "version",
       "os_name",
-      "country",
+      "experiment_id",
+      "experiment_branch",
       "main_crashes",
       "content_crashes",
       "gpu_crashes",
@@ -63,8 +62,6 @@ class TestExperimentErrorAggregator extends AsyncFlatSpec with Matchers with Bef
       "count",
       "subsession_count",
       "usage_hours",
-      "experiment_id",
-      "experiment_branch",
       "window_start",
       "window_end",
       "HllCardinality(client_count) as client_count"
@@ -72,12 +69,11 @@ class TestExperimentErrorAggregator extends AsyncFlatSpec with Matchers with Bef
 
     val query = df.selectExpr(inspectedFields:_*)
     val columns = query.columns
-    val results = columns.zip(columns.map(field => query.collect().map(row => row.getAs[Any](field)).toSet) ).toMap
+    val results = columns.zip(columns.map(field => query.collect().map(row => row.getAs[Any](field)).toSet)).toMap
 
     results("submission_date").map(_.toString) should be (Set("2016-04-07"))
     results("channel") should be (Set(app.channel))
     results("os_name") should be (Set("Linux"))
-    results("country") should be (Set("IT"))
     results("main_crashes") should be (Set(k))
     results("content_crashes") should be (Set(k))
     results("gpu_crashes") should be (Set(k))
