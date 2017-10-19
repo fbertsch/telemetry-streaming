@@ -34,6 +34,12 @@ lazy val root = (project in file(".")).
     libraryDependencies += "org.apache.kafka" % "kafka_2.11" % "0.10.0.1"
   )
 
+// Shade PB files
+assemblyShadeRules in assembly := Seq(
+  ShadeRule.rename("com.google.protobuf.**" -> "shadeproto.@1").inAll,
+  ShadeRule.rename("com.trueaccord.scalapb.**" -> "shadescalapb.@1").inAll
+)
+
 // Setup docker task
 enablePlugins(DockerComposePlugin, DockerPlugin)
 dockerImageCreationTask := docker.value
