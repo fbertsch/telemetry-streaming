@@ -59,12 +59,12 @@ class HttpSink[String](url: String, data: Map[String, String], maxAttempts: Int 
       }
     }
 
+    val url = request.url + "?" + request.params.map{ case(k, v) => s"$k=$v" }.mkString("&")
     (code, tries + 1 == maxAttempts) match {
-      case (OK, _) =>
-      case (ErrorPseudoCode, _) =>
+      case (OK, _) => log.warn(s"OK on $url")
+      case (ErrorPseudoCode, _) => log.warn(s"Error on $url")
       case (c, false) if RetryCodes.contains(c) => attempt(request, tries + 1)
       case (c, _) => {
-        val url = request.url + "?" + request.params.map{ case(k, v) => s"k=v" }.mkString("&")
         log.warn(s"Failed request: $url, last status code: $c")
       }
     }
